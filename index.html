@@ -1,0 +1,346 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>2-Octave Synth with Accurate Replay</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        #keyboard {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            max-width: 50%;
+            margin: 20px auto;
+        }
+
+        .key {
+            width: 100%;
+            padding-bottom: 150%;
+            background: lightgrey;
+            position: relative;
+            text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            border: 2px solid black;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .key:active {
+            background: grey;
+        }
+
+        .key span {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #controls {
+            margin: 20px 0;
+        }
+
+        #status {
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        #timeline {
+            font-family: monospace;
+            text-align: left;
+            margin: 20px;
+            white-space: pre-wrap;
+        }
+
+        #recordings {
+            margin: 20px;
+        }
+
+        .recording {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+        }
+
+        .recording-controls {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 10px;
+        }
+
+        .recording-controls button {
+            padding: 5px 10px;
+        }
+
+        .loop-control {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>2-Octave Synth</h1>
+
+    <div id="keyboard">
+        <div class="key" data-note="261.63"><span>C</span></div>
+        <div class="key" data-note="293.66"><span>D</span></div>
+        <div class="key" data-note="329.63"><span>E</span></div>
+        <div class="key" data-note="349.23"><span>F</span></div>
+        <div class="key" data-note="392.00"><span>G</span></div>
+        <div class="key" data-note="440.00"><span>A</span></div>
+        <div class="key" data-note="493.88"><span>B</span></div>
+        <div class="key" data-note="523.25"><span>C</span></div>
+        <div class="key" data-note="587.33"><span>D</span></div>
+        <div class="key" data-note="659.25"><span>E</span></div>
+        <div class="key" data-note="698.46"><span>F</span></div>
+        <div class="key" data-note="783.99"><span>G</span></div>
+        <div class="key" data-note="880.00"><span>A</span></div>
+        <div class="key" data-note="987.77"><span>B</span></div>
+        <div class="key" data-note="1046.50"><span>C</span></div>
+    </div>
+
+    <div id="controls">
+        <button id="record">Record</button>
+        <button id="stopAll">Stop All</button>
+    </div>
+
+    <div id="status">Status: Idle</div>
+    <div id="timeline"></div>
+
+    <div id="recordings">
+        <h3>Recorded Sessions:</h3>
+    </div>
+
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const maxVoices = 12;
+        let activeVoices = {};
+        let isRecording = false;
+        let recordedActions = [];
+        let recordStartTime = 0;
+        let replaying = false;
+        let replayTimeouts = [];
+        let noteId = 0;
+        const statusField = document.getElementById("status");
+        const timelineField = document.getElementById("timeline");
+        const recordingsDiv = document.getElementById('recordings');
+        let allRecordings = [];
+
+        function createVoice(frequency) {
+            let osc = audioContext.createOscillator();
+            let gain = audioContext.createGain();
+
+            osc.type = 'sawtooth';
+            osc.frequency.value = frequency;
+            gain.gain.setValueAtTime(0, audioContext.currentTime);
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start();
+
+            return { osc, gain };
+        }
+
+        function playNote(frequency, id) {
+            if (Object.keys(activeVoices).length < maxVoices) {
+                const voice = createVoice(frequency);
+                voice.gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.1);
+                activeVoices[id] = voice;
+            }
+        }
+
+        function releaseNote(id) {
+            const voice = activeVoices[id];
+            if (voice) {
+                voice.gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1);
+                setTimeout(() => voice.osc.stop(), 100);
+                delete activeVoices[id];
+            }
+        }
+
+        function recordAction(actionType, frequency, id) {
+            if (isRecording) {
+                const action = {
+                    time: Date.now() - recordStartTime,
+                    type: actionType,
+                    frequency: frequency,
+                    id: id
+                };
+                recordedActions.push(action);
+                updateTimeline(action);
+            }
+        }
+
+        function updateTimeline(action) {
+            let eventText = `Time: ${action.time}ms - ${action.type.toUpperCase()} - Frequency: ${action.frequency || 'N/A'} - Note ID: ${action.id}`;
+            timelineField.innerHTML += `<div>${eventText}</div>`;
+        }
+
+        function setStatus(message) {
+            statusField.innerText = `Status: ${message}`;
+        }
+
+        function startRecording() {
+            recordedActions = [];
+            recordStartTime = Date.now();
+            isRecording = true;
+            timelineField.innerHTML = ""; // Clear timeline display for fresh recording
+            setStatus("Recording");
+        }
+
+        function stopRecording() {
+            const duration = Date.now() - recordStartTime;
+            const recording = {
+                date: new Date().toLocaleString(),
+                duration,
+                notes: recordedActions.length,
+                actions: [...recordedActions],
+                isPlaying: false,
+                currentIndex: 0,
+                pauseTime: 0,
+                replayTimeouts: []
+            };
+            allRecordings.push(recording);
+            addRecordingToList(recording);
+            isRecording = false;
+            setStatus("Idle");
+        }
+
+        function addRecordingToList(recording) {
+            const recordingDiv = document.createElement('div');
+            recordingDiv.className = 'recording';
+            recordingDiv.innerHTML = `
+                Date: ${recording.date}, Duration: ${recording.duration}ms, Notes: ${recording.notes}
+                <div class="recording-status">Status: Stopped</div>
+            `;
+            
+            const controlsDiv = document.createElement('div');
+            controlsDiv.className = 'recording-controls';
+
+            const playButton = document.createElement('button');
+            playButton.innerText = 'Play';
+            playButton.addEventListener('click', () => playRecording(recording, recordingDiv));
+
+            const pauseButton = document.createElement('button');
+            pauseButton.innerText = 'Pause';
+            pauseButton.addEventListener('click', () => pauseRecording(recording, recordingDiv));
+
+            const stopButton = document.createElement('button');
+            stopButton.innerText = 'Stop';
+            stopButton.addEventListener('click', () => stopRecordingPlay(recording, recordingDiv));
+
+            const loopCheckbox = document.createElement('input');
+            loopCheckbox.type = 'checkbox';
+            loopCheckbox.className = 'loop-checkbox';
+            const loopLabel = document.createElement('label');
+            loopLabel.innerText = 'Loop';
+
+            controlsDiv.appendChild(playButton);
+            controlsDiv.appendChild(pauseButton);
+            controlsDiv.appendChild(stopButton);
+            controlsDiv.appendChild(loopCheckbox);
+            controlsDiv.appendChild(loopLabel);
+
+            recordingDiv.appendChild(controlsDiv);
+            recordingsDiv.appendChild(recordingDiv);
+        }
+
+        function playRecording(recording, recordingDiv) {
+            stopRecordingPlay(recording, recordingDiv); // Stop any ongoing replay
+
+            recording.isPlaying = true;
+            recordingDiv.querySelector('.recording-status').innerText = 'Status: Playing';
+            recordingDiv.querySelector('button').innerText = "Restart";
+
+            const startTime = recording.pauseTime ? Date.now() - recording.pauseTime : Date.now();
+            replayRecordingActions(recording, recordingDiv, startTime);
+        }
+
+        function pauseRecording(recording, recordingDiv) {
+            recording.isPlaying = false;
+            recording.pauseTime = Date.now() - recording.startTime;
+            recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+            recordingDiv.querySelector('.recording-status').innerText = 'Status: Paused';
+        }
+
+        function stopRecordingPlay(recording, recordingDiv) {
+            recording.isPlaying = false;
+            recording.pauseTime = 0;
+            recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+            recording.replayTimeouts = [];
+            recordingDiv.querySelector('.recording-status').innerText = 'Status: Stopped';
+        }
+
+        function replayRecordingActions(recording, recordingDiv, startTime) {
+            const actions = recording.actions;
+            recording.startTime = startTime;
+            actions.forEach((action, index) => {
+                const delay = action.time - (recording.pauseTime || 0);
+                if (delay < 0) return;  // Skip past actions during resumed playback
+
+                const timeout = setTimeout(() => {
+                    if (!recording.isPlaying) return;
+
+                    if (action.type === 'play') {
+                        playNote(action.frequency, action.id);
+                    } else if (action.type === 'release') {
+                        releaseNote(action.id);
+                    }
+
+                    if (index === actions.length - 1 && recordingDiv.querySelector('.loop-checkbox').checked) {
+                        playRecording(recording, recordingDiv);
+                    }
+                }, delay);
+                recording.replayTimeouts.push(timeout);
+            });
+        }
+
+        function handleNoteStart(e, key) {
+            e.preventDefault();
+            const frequency = key.getAttribute('data-note');
+            noteId += 1;
+            playNote(parseFloat(frequency), noteId);
+            recordAction('play', parseFloat(frequency), noteId);
+        }
+
+        function handleNoteEnd(e, key) {
+            e.preventDefault();
+            recordAction('release', null, noteId);
+            releaseNote(noteId);
+        }
+
+        document.querySelectorAll('.key').forEach(key => {
+            key.addEventListener('mousedown', (e) => handleNoteStart(e, key));
+            key.addEventListener('mouseup', (e) => handleNoteEnd(e, key));
+
+            key.addEventListener('touchstart', (e) => handleNoteStart(e, key));
+            key.addEventListener('touchend', (e) => handleNoteEnd(e, key));
+            key.addEventListener('touchcancel', (e) => handleNoteEnd(e, key));
+        });
+
+        document.getElementById('record').addEventListener('click', () => {
+            if (!isRecording) {
+                startRecording();
+                document.getElementById('record').innerText = 'Stop Recording';
+            } else {
+                stopRecording();
+                document.getElementById('record').innerText = 'Record';
+            }
+        });
+
+        document.getElementById('stopAll').addEventListener('click', () => {
+            allRecordings.forEach(recording => stopRecordingPlay(recording));
+        });
+    </script>
+
+</body>
+
+</html>
