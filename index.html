@@ -2,343 +2,581 @@
 <html>
 
 <head>
-    <title>2-Octave Synth with Accurate Replay</title>
+    <title>Harmonic Synth with Dynamic Keyboard</title>
+    
     <meta name="viewport" content="width=device-width, initial-scale=1">
+
     <style>
         body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-        }
-
-        #keyboard {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            gap: 5px;
-            max-width: 50%;
-            margin: 20px auto;
-        }
-
-        .key {
-            width: 100%;
-            padding-bottom: 150%;
-            background: lightgrey;
-            position: relative;
-            text-align: center;
-            font-size: 1.5em;
-            font-weight: bold;
-            border: 2px solid black;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .key:active {
-            background: grey;
-        }
-
-        .key span {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        }
-
-        #controls {
-            margin: 20px 0;
-        }
-
-        #status {
-            font-weight: bold;
-            margin: 20px 0;
-        }
-
-        #timeline {
-            font-family: monospace;
-            text-align: left;
-            margin: 20px;
-            white-space: pre-wrap;
-        }
-
-        #recordings {
-            margin: 20px;
-        }
-
-        .recording {
-            background-color: #f0f0f0;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ccc;
-        }
-
-        .recording-controls {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 10px;
-        }
-
-        .recording-controls button {
-            padding: 5px 10px;
-        }
-
-        .loop-control {
-            margin-top: 10px;
-        }
+        font-family: Arial, sans-serif;
+        text-align: center;
+    }
+    #keyboard {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        gap: 5px;
+        max-width: 50%;
+        margin: 20px auto;
+    }
+    .key {
+        width: 100%;
+        padding-bottom: 150%;
+        background: lightgrey;
+        position: relative;
+        text-align: center;
+        font-size: 1.5em;
+        font-weight: bold;
+        border: 2px solid black;
+        cursor: pointer;
+        user-select: none;
+    }
+    .key:active {
+        background: grey;
+    }
+    .key span {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+    #controls {
+        margin: 20px 0;
+    }
+    #status {
+        font-weight: bold;
+        margin: 20px 0;
+    }
+    #timeline {
+        font-family: monospace;
+        text-align: left;
+        margin: 20px;
+        white-space: pre-wrap;
+    }
+    #recordings {
+        margin: 20px;
+    }
+    .recording {
+        background-color: #f0f0f0;
+        padding: 10px;
+        margin: 10px 0;
+        border: 1px solid #ccc;
+    }
+    .recording-controls {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 10px;
+    }
+    .recording-controls button {
+        padding: 5px 10px;
+    }
+    .loop-control {
+        margin-top: 10px;
+    }
     </style>
 </head>
 
 <body>
-
-    <h1>2-Octave Synth</h1>
-
-    <div id="keyboard">
-        <div class="key" data-note="261.63"><span>C</span></div>
-        <div class="key" data-note="293.66"><span>D</span></div>
-        <div class="key" data-note="329.63"><span>E</span></div>
-        <div class="key" data-note="349.23"><span>F</span></div>
-        <div class="key" data-note="392.00"><span>G</span></div>
-        <div class="key" data-note="440.00"><span>A</span></div>
-        <div class="key" data-note="493.88"><span>B</span></div>
-        <div class="key" data-note="523.25"><span>C</span></div>
-        <div class="key" data-note="587.33"><span>D</span></div>
-        <div class="key" data-note="659.25"><span>E</span></div>
-        <div class="key" data-note="698.46"><span>F</span></div>
-        <div class="key" data-note="783.99"><span>G</span></div>
-        <div class="key" data-note="880.00"><span>A</span></div>
-        <div class="key" data-note="987.77"><span>B</span></div>
-        <div class="key" data-note="1046.50"><span>C</span></div>
-    </div>
-
+    <h1>Harmonic Synth</h1>
+    <div id="keyboard"></div>
     <div id="controls">
         <button id="record">Record</button>
         <button id="stopAll">Stop All</button>
     </div>
-
+    <input type="number" id="tempoInput" value="120" min="40" max="240" step="1">
+    <label for="tempoInput">BPM</label>
+    <button id="toggleMetronome">Start/Stop Metronome</button>
     <div id="status">Status: Idle</div>
     <div id="timeline"></div>
-
     <div id="recordings">
         <h3>Recorded Sessions:</h3>
     </div>
-
     <script>
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const maxVoices = 12;
-        let activeVoices = {};
-        let isRecording = false;
-        let recordedActions = [];
-        let recordStartTime = 0;
-        let replaying = false;
-        let replayTimeouts = [];
-        let noteId = 0;
-        const statusField = document.getElementById("status");
-        const timelineField = document.getElementById("timeline");
-        const recordingsDiv = document.getElementById('recordings');
-        let allRecordings = [];
-
-        function createVoice(frequency) {
-            let osc = audioContext.createOscillator();
-            let gain = audioContext.createGain();
-
-            osc.type = 'sawtooth';
-            osc.frequency.value = frequency;
-            gain.gain.setValueAtTime(0, audioContext.currentTime);
-
-            osc.connect(gain);
-            gain.connect(audioContext.destination);
-            osc.start();
-
-            return { osc, gain };
+    // Presents and Sequences
+    const presets = {
+        "Major Arpeggio (C Major)": [261.63, 329.63, 392.00, 523.25, 659.25, 783.99], // C4, E4, G4, C5, E5, G5
+        "Minor Arpeggio (A Minor)": [220.00, 261.63, 329.63, 440.00, 523.25, 659.25], // A3, C4, E4, A4, C5, E5
+        "Seventh Arpeggio (C7)": [261.63, 329.63, 392.00, 466.16, 523.25, 659.25, 783.99], // C4, E4, G4, Bb4, C5, E5, G5
+        "Pentatonic Scale (C Major)": [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25], // C4, D4, E4, G4, A4, C5, D5, E5
+        "Blues Scale (C Blues)": [261.63, 311.13, 329.63, 349.23, 392.00, 466.16, 523.25], // C4, Eb4, E4, F4, G4, Bb4, C5
+        "Chromatic Scale (C)": [261.63, 277.18, 293.66, 311.13, 329.63, 349.23, 369.99, 392.00, 415.30, 440.00, 466.16, 493.88, 523.25], // C4 to C5
+        "Major Chord (C Major)": [261.63, 329.63, 392.00], // C4, E4, G4
+        "Minor Chord (A Minor)": [220.00, 261.63, 329.63], // A3, C4, E4
+        "Diminished Chord (C Dim)": [261.63, 311.13, 370.00], // C4, Eb4, Gb4
+        "Whole Tone Scale (C)": [261.63, 293.66, 329.63, 369.99, 415.30, 466.16], // C4, D4, E4, F#4, G#4, A#4
+        "Harmonic Minor Scale (A Minor)": [220.00, 246.94, 261.63, 293.66, 329.63, 349.23, 415.30, 440.00], // A3 to A4
+        "Octatonic Scale (Diminished)": [261.63, 293.66, 311.13, 349.23, 369.99, 415.30, 440.00, 493.88], // C4, D4, Eb4, F4, F#4, G#4, A4, B4
+        "Lydian Mode (C Lydian)": [261.63, 293.66, 329.63, 369.99, 392.00, 440.00, 493.88], // C4, D4, E4, F#4, G4, A4, B4
+        "Phrygian Mode (E Phrygian)": [261.63, 277.18, 329.63, 349.23, 392.00, 415.30, 493.88], // E4, F4, G4, A4, B4, C5, D5
+        "Dorian Mode (D Dorian)": [261.63, 293.66, 311.13, 349.23, 392.00, 440.00, 466.16], // D4, E4, F4, G4, A4, B4, C5
+        "Arabian Scale": [261.63, 293.66, 311.13, 349.23, 370.00, 415.30, 466.16], // C4, D4, Eb4, F4, Gb4, G#4, Bb4
+        "Indian Raga (Raga Bhairav)": [261.63, 277.18, 311.13, 329.63, 392.00, 415.30, 493.88], // C4, Db4, Eb4, F4, G4, A4, B4
+        "Japanese Insen Scale": [261.63, 293.66, 311.13, 392.00, 440.00], // C4, D4, Eb4, G4, A4
+        "Jazz Minor (C Jazz Minor)": [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88], // C4, D4, E4, F4, G4, A4, B4
+        "Gypsy Scale (C Gypsy)": [261.63, 293.66, 311.13, 392.00, 415.30, 493.88], // C4, D4, Eb4, G4, G#4, B4
+        "Hungarian Minor Scale": [261.63, 293.66, 311.13, 392.00, 415.30, 466.16, 493.88], // C4, D4, Eb4, F#4, G#4, A4, B4
+    };
+    // Map MIDI notes to frequencies (two octaves from C4 to B5)
+    const midiNoteToFreq = {
+        0: 8.18, // C-1
+        1: 8.66, // C#-1
+        2: 9.18, // D-1
+        3: 9.72, // D#-1
+        4: 10.30, // E-1
+        5: 10.91, // F-1
+        6: 11.56, // F#-1
+        7: 12.25, // G-1
+        8: 12.98, // G#-1
+        9: 13.75, // A-1
+        10: 14.57, // A#-1
+        11: 15.43, // B-1
+        12: 16.35, // C0
+        13: 17.32, // C#0
+        14: 18.35, // D0
+        15: 19.45, // D#0
+        16: 20.60, // E0
+        17: 21.83, // F0
+        18: 23.12, // F#0
+        19: 24.50, // G0
+        20: 25.96, // G#0
+        21: 27.50, // A0
+        22: 29.14, // A#0
+        23: 30.87, // B0
+        24: 32.70, // C1
+        25: 34.65, // C#1
+        26: 36.71, // D1
+        27: 38.89, // D#1
+        28: 41.20, // E1
+        29: 43.65, // F1
+        30: 46.25, // F#1
+        31: 49.00, // G1
+        32: 51.91, // G#1
+        33: 55.00, // A1
+        34: 58.27, // A#1
+        35: 61.74, // B1
+        36: 65.41, // C2
+        37: 69.30, // C#2
+        38: 73.42, // D2
+        39: 77.78, // D#2
+        40: 82.41, // E2
+        41: 87.31, // F2
+        42: 92.50, // F#2
+        43: 98.00, // G2
+        44: 103.83, // G#2
+        45: 110.00, // A2
+        46: 116.54, // A#2
+        47: 123.47, // B2
+        48: 130.81, // C3
+        49: 138.59, // C#3
+        50: 146.83, // D3
+        51: 155.56, // D#3
+        52: 164.81, // E3
+        53: 174.61, // F3
+        54: 185.00, // F#3
+        55: 196.00, // G3
+        56: 207.65, // G#3
+        57: 220.00, // A3
+        58: 233.08, // A#3
+        59: 246.94, // B3
+        60: 261.63, // C4
+        61: 277.18, // C#4
+        62: 293.66, // D4
+        63: 311.13, // D#4
+        64: 329.63, // E4
+        65: 349.23, // F4
+        66: 369.99, // F#4
+        67: 392.00, // G4
+        68: 415.30, // G#4
+        69: 440.00, // A4
+        70: 466.16, // A#4
+        71: 493.88, // B4
+        72: 523.25, // C5
+        73: 554.37, // C#5
+        74: 587.33, // D5
+        75: 622.25, // D#5
+        76: 659.25, // E5
+        77: 698.46, // F5
+        78: 739.99, // F#5
+        79: 783.99, // G5
+        80: 830.61, // G#5
+        81: 880.00, // A5
+        82: 932.33, // A#5
+        83: 987.77, // B5
+        84: 1046.50, // C6
+        85: 1108.73, // C#6
+        86: 1174.66, // D6
+        87: 1244.51, // D#6
+        88: 1318.51, // E6
+        89: 1396.91, // F6
+        90: 1479.98, // F#6
+        91: 1567.98, // G6
+        92: 1661.22, // G#6
+        93: 1760.00, // A6
+        94: 1864.66, // A#6
+        95: 1975.53 // B6
+    };
+    //const audioContext = new(window.AudioContext || window.webkitAudioContext)();
+    const maxVoices = 12;
+    let activeVoices = {};
+    let isRecording = false;
+    let recordedActions = [];
+    let recordStartTime = 0;
+    let replaying = false;
+    let replayTimeouts = [];
+    let noteId = 0;
+    const statusField = document.getElementById("status");
+    const timelineField = document.getElementById("timeline");
+    const recordingsDiv = document.getElementById('recordings');
+    const keyboardDiv = document.getElementById('keyboard');
+    let allRecordings = [];
+    // Audio context
+    let audioContext;
+    let audioStarted = false;
+    // Start audio context on any user interaction
+    function startAudioContext() {
+        if (!audioStarted) {
+            audioContext = new(window.AudioContext || window.webkitAudioContext)();
+            audioStarted = true;
         }
-
-        function playNote(frequency, id) {
-            if (Object.keys(activeVoices).length < maxVoices) {
-                const voice = createVoice(frequency);
-                voice.gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.1);
-                activeVoices[id] = voice;
-            }
+    }
+    // Event listeners for user interactions to start the audio context
+    document.addEventListener('keydown', startAudioContext);
+    document.addEventListener('mousedown', startAudioContext);
+    document.addEventListener('touchstart', startAudioContext);
+    document.getElementById('record').addEventListener('click', () => {
+        startAudioContext(); // Ensure the audio context starts
+        if (!isRecording) {
+            startRecording();
+            document.getElementById('record').innerText = 'Stop Recording';
+        } else {
+            stopRecording();
+            document.getElementById('record').innerText = 'Record';
         }
+    });
 
-        function releaseNote(id) {
-            const voice = activeVoices[id];
-            if (voice) {
-                voice.gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1);
-                setTimeout(() => voice.osc.stop(), 100);
-                delete activeVoices[id];
-            }
+    function createVoice(frequency) {
+        if (!audioStarted) return;
+        let osc = audioContext.createOscillator();
+        let gain = audioContext.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, audioContext.currentTime);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start();
+        return { osc, gain };
+    }
+
+    function playNote(frequency, id) {
+        if (!audioStarted || Object.keys(activeVoices).length >= maxVoices) return;
+        const voice = createVoice(frequency);
+        voice.gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.1);
+        activeVoices[id] = voice;
+    }
+
+    function releaseNote(id) {
+        const voice = activeVoices[id];
+        if (voice) {
+            voice.gain.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1);
+            setTimeout(() => voice.osc.stop(), 100);
+            delete activeVoices[id];
         }
+    }
 
-        function recordAction(actionType, frequency, id) {
-            if (isRecording) {
-                const action = {
-                    time: Date.now() - recordStartTime,
-                    type: actionType,
-                    frequency: frequency,
-                    id: id
-                };
-                recordedActions.push(action);
-                updateTimeline(action);
-            }
-        }
-
-        function updateTimeline(action) {
-            let eventText = `Time: ${action.time}ms - ${action.type.toUpperCase()} - Frequency: ${action.frequency || 'N/A'} - Note ID: ${action.id}`;
-            timelineField.innerHTML += `<div>${eventText}</div>`;
-        }
-
-        function setStatus(message) {
-            statusField.innerText = `Status: ${message}`;
-        }
-
-        function startRecording() {
-            recordedActions = [];
-            recordStartTime = Date.now();
-            isRecording = true;
-            timelineField.innerHTML = ""; // Clear timeline display for fresh recording
-            setStatus("Recording");
-        }
-
-        function stopRecording() {
-            const duration = Date.now() - recordStartTime;
-            const recording = {
-                date: new Date().toLocaleString(),
-                duration,
-                notes: recordedActions.length,
-                actions: [...recordedActions],
-                isPlaying: false,
-                currentIndex: 0,
-                pauseTime: 0,
-                replayTimeouts: []
+    function recordAction(actionType, frequency, id) {
+        if (isRecording) {
+            const action = {
+                time: Date.now() - recordStartTime,
+                type: actionType,
+                frequency: frequency,
+                id: id
             };
-            allRecordings.push(recording);
-            addRecordingToList(recording);
-            isRecording = false;
-            setStatus("Idle");
+            recordedActions.push(action);
+            updateTimeline(action);
         }
+    }
 
-        function addRecordingToList(recording) {
-            const recordingDiv = document.createElement('div');
-            recordingDiv.className = 'recording';
-            recordingDiv.innerHTML = `
-                Date: ${recording.date}, Duration: ${recording.duration}ms, Notes: ${recording.notes}
-                <div class="recording-status">Status: Stopped</div>
-            `;
-            
-            const controlsDiv = document.createElement('div');
-            controlsDiv.className = 'recording-controls';
+    function updateTimeline(action) {
+        let eventText = `Time: ${action.time}ms - ${action.type.toUpperCase()} - Frequency: ${action.frequency || 'N/A'} - Note ID: ${action.id}`;
+        timelineField.innerHTML += `<div>${eventText}</div>`;
+    }
 
-            const playButton = document.createElement('button');
-            playButton.innerText = 'Play';
-            playButton.addEventListener('click', () => playRecording(recording, recordingDiv));
+    function setStatus(message) {
+        statusField.innerText = `Status: ${message}`;
+    }
 
-            const pauseButton = document.createElement('button');
-            pauseButton.innerText = 'Pause';
-            pauseButton.addEventListener('click', () => pauseRecording(recording, recordingDiv));
+    function startRecording() {
+        recordedActions = [];
+        recordStartTime = Date.now();
+        isRecording = true;
+        timelineField.innerHTML = ""; // Clear timeline display for fresh recording
+        setStatus("Recording");
+    }
 
-            const stopButton = document.createElement('button');
-            stopButton.innerText = 'Stop';
-            stopButton.addEventListener('click', () => stopRecordingPlay(recording, recordingDiv));
+    function stopRecording() {
+        const duration = Date.now() - recordStartTime;
+        const recording = {
+            date: new Date().toLocaleString(),
+            duration,
+            notes: recordedActions.length,
+            actions: [...recordedActions],
+            isPlaying: false,
+            currentIndex: 0,
+            pauseTime: 0,
+            replayTimeouts: []
+        };
+        allRecordings.push(recording);
+        addRecordingToList(recording);
+        isRecording = false;
+        setStatus("Idle");
+    }
 
-            const loopCheckbox = document.createElement('input');
-            loopCheckbox.type = 'checkbox';
-            loopCheckbox.className = 'loop-checkbox';
-            const loopLabel = document.createElement('label');
-            loopLabel.innerText = 'Loop';
+    function addRecordingToList(recording) {
+        const recordingDiv = document.createElement('div');
+        recordingDiv.className = 'recording';
+        recordingDiv.innerHTML = `
+        Date: ${recording.date}, Duration: ${recording.duration}ms, Notes: ${recording.notes}
+        <div class="recording-status">Status: Stopped</div>
+    `;
+        const controlsDiv = document.createElement('div');
+        controlsDiv.className = 'recording-controls';
+        const playButton = document.createElement('button');
+        playButton.innerText = 'Play';
+        playButton.addEventListener('click', () => playRecording(recording, recordingDiv));
+        const pauseButton = document.createElement('button');
+        pauseButton.innerText = 'Pause';
+        pauseButton.addEventListener('click', () => pauseRecording(recording, recordingDiv));
+        const stopButton = document.createElement('button');
+        stopButton.innerText = 'Stop';
+        stopButton.addEventListener('click', () => stopRecordingPlay(recording, recordingDiv));
+        const loopCheckbox = document.createElement('input');
+        loopCheckbox.type = 'checkbox';
+        loopCheckbox.className = 'loop-checkbox';
+        const loopLabel = document.createElement('label');
+        loopLabel.innerText = 'Loop';
+        controlsDiv.appendChild(playButton);
+        controlsDiv.appendChild(pauseButton);
+        controlsDiv.appendChild(stopButton);
+        controlsDiv.appendChild(loopCheckbox);
+        controlsDiv.appendChild(loopLabel);
+        recordingDiv.appendChild(controlsDiv);
+        recordingsDiv.appendChild(recordingDiv);
+    }
 
-            controlsDiv.appendChild(playButton);
-            controlsDiv.appendChild(pauseButton);
-            controlsDiv.appendChild(stopButton);
-            controlsDiv.appendChild(loopCheckbox);
-            controlsDiv.appendChild(loopLabel);
+    function playRecording(recording, recordingDiv) {
+        stopRecordingPlay(recording, recordingDiv); // Stop any ongoing replay
+        recording.isPlaying = true;
+        recordingDiv.querySelector('.recording-status').innerText = 'Status: Playing';
+        recordingDiv.querySelector('button').innerText = "Restart";
+        const startTime = recording.pauseTime ? Date.now() - recording.pauseTime : Date.now();
+        replayRecordingActions(recording, recordingDiv, startTime);
+    }
 
-            recordingDiv.appendChild(controlsDiv);
-            recordingsDiv.appendChild(recordingDiv);
+    function pauseRecording(recording, recordingDiv) {
+        recording.isPlaying = false;
+        recording.pauseTime = Date.now() - recording.startTime;
+        recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+        recordingDiv.querySelector('.recording-status').innerText = 'Status: Paused';
+    }
+
+    function stopRecordingPlay(recording, recordingDiv) {
+        recording.isPlaying = false;
+        recording.pauseTime = 0;
+        recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+        recording.replayTimeouts = [];
+        recordingDiv.querySelector('.recording-status').innerText = 'Status: Stopped';
+    }
+
+    function replayRecordingActions(recording, recordingDiv, startTime) {
+        const actions = recording.actions;
+        recording.startTime = startTime;
+        actions.forEach((action, index) => {
+            const delay = action.time - (recording.pauseTime || 0);
+            if (delay < 0) return; // Skip past actions during resumed playback
+            const timeout = setTimeout(() => {
+                if (!recording.isPlaying) return;
+                if (action.type === 'play') {
+                    playNote(action.frequency, action.id);
+                } else if (action.type === 'release') {
+                    releaseNote(action.id);
+                }
+                if (index === actions.length - 1 && recordingDiv.querySelector('.loop-checkbox').checked) {
+                    playRecording(recording, recordingDiv);
+                }
+            }, delay);
+            recording.replayTimeouts.push(timeout);
+        });
+    }
+
+    function handleNoteStart(e, key) {
+        e.preventDefault();
+        const frequency = key.getAttribute('data-note');
+        noteId += 1;
+        playNote(parseFloat(frequency), noteId);
+        recordAction('play', parseFloat(frequency), noteId);
+    }
+
+    function handleNoteEnd(e, key) {
+        e.preventDefault();
+        recordAction('release', null, noteId);
+        releaseNote(noteId);
+    }
+    let keyBindings = {};
+    let keyToNoteMap = {}; // Map for tracking noteId for each key
+    // MIDI Initialization
+    if (navigator.requestMIDIAccess) {
+        navigator.requestMIDIAccess()
+            .then(onMIDISuccess, onMIDIFailure);
+    } else {
+        console.log("WebMIDI is not supported in this browser.");
+    }
+
+    function onMIDISuccess(midiAccess) {
+        console.log("MIDI Access granted.");
+        midiAccess.inputs.forEach(input => {
+            input.onmidimessage = getMIDIMessage;
+        });
+    }
+
+    function onMIDIFailure() {
+        console.log("Could not access your MIDI devices.");
+    }
+
+    function getMIDIMessage(message) {
+        const [command, note, velocity] = message.data;
+        if (command === 144 && velocity > 0) { // Note On
+            handleMIDIKeyDown(note, velocity);
+        } else if (command === 128 || (command === 144 && velocity === 0)) { // Note Off
+            handleMIDIKeyUp(note);
         }
+    }
 
-        function playRecording(recording, recordingDiv) {
-            stopRecordingPlay(recording, recordingDiv); // Stop any ongoing replay
-
-            recording.isPlaying = true;
-            recordingDiv.querySelector('.recording-status').innerText = 'Status: Playing';
-            recordingDiv.querySelector('button').innerText = "Restart";
-
-            const startTime = recording.pauseTime ? Date.now() - recording.pauseTime : Date.now();
-            replayRecordingActions(recording, recordingDiv, startTime);
-        }
-
-        function pauseRecording(recording, recordingDiv) {
-            recording.isPlaying = false;
-            recording.pauseTime = Date.now() - recording.startTime;
-            recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
-            recordingDiv.querySelector('.recording-status').innerText = 'Status: Paused';
-        }
-
-        function stopRecordingPlay(recording, recordingDiv) {
-            recording.isPlaying = false;
-            recording.pauseTime = 0;
-            recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
-            recording.replayTimeouts = [];
-            recordingDiv.querySelector('.recording-status').innerText = 'Status: Stopped';
-        }
-
-        function replayRecordingActions(recording, recordingDiv, startTime) {
-            const actions = recording.actions;
-            recording.startTime = startTime;
-            actions.forEach((action, index) => {
-                const delay = action.time - (recording.pauseTime || 0);
-                if (delay < 0) return;  // Skip past actions during resumed playback
-
-                const timeout = setTimeout(() => {
-                    if (!recording.isPlaying) return;
-
-                    if (action.type === 'play') {
-                        playNote(action.frequency, action.id);
-                    } else if (action.type === 'release') {
-                        releaseNote(action.id);
-                    }
-
-                    if (index === actions.length - 1 && recordingDiv.querySelector('.loop-checkbox').checked) {
-                        playRecording(recording, recordingDiv);
-                    }
-                }, delay);
-                recording.replayTimeouts.push(timeout);
-            });
-        }
-
-        function handleNoteStart(e, key) {
-            e.preventDefault();
-            const frequency = key.getAttribute('data-note');
+    function handleMIDIKeyDown(note, velocity) {
+        const frequency = midiNoteToFreq[note];
+        if (frequency && !keyToNoteMap[note]) { // Ensure note isn't already playing
             noteId += 1;
-            playNote(parseFloat(frequency), noteId);
-            recordAction('play', parseFloat(frequency), noteId);
+            playNote(frequency, noteId);
+            recordAction('play', frequency, noteId);
+            keyToNoteMap[note] = noteId; // Track noteId for the pressed MIDI key
         }
+    }
 
-        function handleNoteEnd(e, key) {
-            e.preventDefault();
-            recordAction('release', null, noteId);
-            releaseNote(noteId);
+    function handleMIDIKeyUp(note) {
+        const currentNoteId = keyToNoteMap[note];
+        if (currentNoteId) {
+            recordAction('release', null, currentNoteId);
+            releaseNote(currentNoteId);
+            delete keyToNoteMap[note]; // Remove from the map when the key is released
         }
+    }
 
-        document.querySelectorAll('.key').forEach(key => {
+    function bindKeyboard(frequencies) {
+        keyBindings = {}; // Clear previous bindings
+        keyToNoteMap = {}; // Clear previous noteId map
+        frequencies.forEach((freq, index) => {
+            const key = (index + 1).toString(); // Map 1, 2, 3, etc. to the frequencies
+            keyBindings[key] = freq;
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (keyBindings[e.key] && !keyToNoteMap[e.key]) { // Ensure note isn't already playing
+            noteId += 1;
+            playNote(keyBindings[e.key], noteId);
+            recordAction('play', keyBindings[e.key], noteId);
+            keyToNoteMap[e.key] = noteId; // Track noteId for the pressed key
+        }
+    });
+    document.addEventListener('keyup', (e) => {
+        if (keyBindings[e.key] && keyToNoteMap[e.key]) {
+            const currentNoteId = keyToNoteMap[e.key]; // Retrieve the noteId for this key
+            recordAction('release', null, currentNoteId);
+            releaseNote(currentNoteId);
+            delete keyToNoteMap[e.key]; // Remove from the map when the key is released
+        }
+    });
+
+    function makeKeyboard(preset) {
+        const frequencies = presets[preset];
+        if (!frequencies) return;
+        keyboardDiv.innerHTML = ''; // Clear existing keys
+        bindKeyboard(frequencies); // Bind frequencies to desktop keyboard keys
+        frequencies.forEach(freq => {
+            const key = document.createElement('div');
+            key.className = 'key';
+            key.setAttribute('data-note', freq);
+            key.innerHTML = `<span>${freq.toFixed(2)}</span>`;
             key.addEventListener('mousedown', (e) => handleNoteStart(e, key));
             key.addEventListener('mouseup', (e) => handleNoteEnd(e, key));
-
             key.addEventListener('touchstart', (e) => handleNoteStart(e, key));
             key.addEventListener('touchend', (e) => handleNoteEnd(e, key));
-            key.addEventListener('touchcancel', (e) => handleNoteEnd(e, key));
+            keyboardDiv.appendChild(key);
         });
+    }
+    const presetSelector = document.createElement('select');
+    Object.keys(presets).forEach(preset => {
+        const option = document.createElement('option');
+        option.value = preset;
+        option.text = preset;
+        presetSelector.appendChild(option);
+    });
+    presetSelector.addEventListener('change', (e) => makeKeyboard(e.target.value));
+    document.body.insertBefore(presetSelector, keyboardDiv);
+    // Initialize with default preset after page load
+    window.onload = function() {
+        makeKeyboard("Major Arpeggio (C Major)");
+    };
+    document.getElementById('stopAll').addEventListener('click', () => {
+        allRecordings.forEach(recording => stopRecordingPlay(recording));
+    });
+    /* Metronome */
+    let metronomeInterval;
+    let metronomeRunning = false;
+    let tempo = 120;
 
-        document.getElementById('record').addEventListener('click', () => {
-            if (!isRecording) {
-                startRecording();
-                document.getElementById('record').innerText = 'Stop Recording';
-            } else {
-                stopRecording();
-                document.getElementById('record').innerText = 'Record';
-            }
-        });
+    function startMetronome() {
+        if (metronomeRunning) return;
+        const interval = (60 / tempo) * 1000; // Calculate interval in ms
+        let isTick = true;
+        metronomeInterval = setInterval(() => {
+            playTickTock(isTick);
+            isTick = !isTick; // Alternate between tick and tock
+        }, interval);
+        metronomeRunning = true;
+    }
 
-        document.getElementById('stopAll').addEventListener('click', () => {
-            allRecordings.forEach(recording => stopRecordingPlay(recording));
-        });
+    function stopMetronome() {
+        clearInterval(metronomeInterval);
+        metronomeRunning = false;
+    }
+
+    function toggleMetronome() {
+        if (metronomeRunning) {
+            stopMetronome();
+        } else {
+            startMetronome();
+        }
+    }
+
+    function playTickTock(isTick) {
+        const metronomeSound = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        metronomeSound.type = 'square';
+        metronomeSound.frequency.value = isTick ? 1000 : 800; // Slightly different frequencies for variation
+        gain.gain.setValueAtTime(1, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.05); // Rapid decay to create a short click
+        metronomeSound.connect(gain);
+        gain.connect(audioContext.destination);
+        metronomeSound.start();
+        metronomeSound.stop(audioContext.currentTime + 0.05); // Stop after a very short duration for a click-like sound
+    }
+    document.getElementById('tempoInput').addEventListener('input', (e) => {
+        tempo = parseInt(e.target.value);
+        if (metronomeRunning) {
+            stopMetronome();
+            startMetronome();
+        }
+    });
+
+    document.getElementById('toggleMetronome').addEventListener('click', toggleMetronome);
     </script>
 
 </body>
