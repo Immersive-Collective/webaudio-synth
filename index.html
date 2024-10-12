@@ -3,9 +3,7 @@
 
 <head>
     <title>Harmonic Synth with Dynamic Keyboard</title>
-    
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <style>
         body {
         font-family: Arial, sans-serif;
@@ -81,6 +79,11 @@
     <div id="controls">
         <button id="record">Record</button>
         <button id="stopAll">Stop All</button>
+        <button id="playAll">Play All</button>
+        <button id="stopAllRecordings">Stop All Recordings</button>
+        <button id="exportSequence">Export Sequence</button>
+        <input type="file" id="uploadSequence" accept=".json" style="display: none;">
+        <button id="uploadSequenceButton">Upload Sequence</button>
     </div>
     <input type="number" id="tempoInput" value="120" min="40" max="240" step="1">
     <label for="tempoInput">BPM</label>
@@ -115,6 +118,7 @@
         "Gypsy Scale (C Gypsy)": [261.63, 293.66, 311.13, 392.00, 415.30, 493.88], // C4, D4, Eb4, G4, G#4, B4
         "Hungarian Minor Scale": [261.63, 293.66, 311.13, 392.00, 415.30, 466.16, 493.88], // C4, D4, Eb4, F#4, G#4, A4, B4
     };
+
     // Map MIDI notes to frequencies (two octaves from C4 to B5)
     const midiNoteToFreq = {
         0: 8.18, // C-1
@@ -214,7 +218,8 @@
         94: 1864.66, // A#6
         95: 1975.53 // B6
     };
-    //const audioContext = new(window.AudioContext || window.webkitAudioContext)();
+
+
     const maxVoices = 12;
     let activeVoices = {};
     let isRecording = false;
@@ -228,9 +233,11 @@
     const recordingsDiv = document.getElementById('recordings');
     const keyboardDiv = document.getElementById('keyboard');
     let allRecordings = [];
+
     // Audio context
     let audioContext;
     let audioStarted = false;
+
     // Start audio context on any user interaction
     function startAudioContext() {
         if (!audioStarted) {
@@ -238,6 +245,7 @@
             audioStarted = true;
         }
     }
+
     // Event listeners for user interactions to start the audio context
     document.addEventListener('keydown', startAudioContext);
     document.addEventListener('mousedown', startAudioContext);
@@ -253,25 +261,54 @@
         }
     });
 
-    function createVoice(frequency) {
-        if (!audioStarted) return;
-        let osc = audioContext.createOscillator();
-        let gain = audioContext.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.value = frequency;
-        gain.gain.setValueAtTime(0, audioContext.currentTime);
-        osc.connect(gain);
-        gain.connect(audioContext.destination);
-        osc.start();
-        return { osc, gain };
-    }
+function createVoice(frequency) {
+    if (!audioStarted) return;
 
-    function playNote(frequency, id) {
+    let osc = audioContext.createOscillator();
+    let gain = audioContext.createGain();
+
+    // Stochastic selection of oscillator type based on weighted probabilities
+    const oscillatorType = getStochasticOscillatorType();
+    osc.type = oscillatorType;
+
+    osc.frequency.value = frequency;
+    gain.gain.setValueAtTime(0, audioContext.currentTime);
+
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start();
+    return { osc, gain };
+}
+
+function getStochasticOscillatorType() {
+    // Define probabilities for each oscillator type
+    const types = ['sine', 'square', 'sawtooth', 'triangle'];
+    const weights = [0.2, 0.3, 0.3, 0.2]; // Adjust these weights as needed
+
+    // Generate a random number and select an oscillator type based on weighted probabilities
+    const randomValue = Math.random();
+    let cumulativeWeight = 0;
+
+    for (let i = 0; i < types.length; i++) {
+        cumulativeWeight += weights[i];
+        if (randomValue < cumulativeWeight) {
+            return types[i];
+        }
+    }
+    return 'sine'; // Default to 'sine' if something goes wrong
+}
+
+
+    function playNote(frequency, id, recording = null) {
         if (!audioStarted || Object.keys(activeVoices).length >= maxVoices) return;
+
+        if (recording && recording.isMuted) return; // Skip playing sound if muted
+
         const voice = createVoice(frequency);
         voice.gain.gain.linearRampToValueAtTime(1, audioContext.currentTime + 0.1);
         activeVoices[id] = voice;
     }
+
 
     function releaseNote(id) {
         const voice = activeVoices[id];
@@ -331,35 +368,88 @@
     }
 
     function addRecordingToList(recording) {
+        const recordingId = allRecordings.length - 1; // Use the index in the array as a unique ID
         const recordingDiv = document.createElement('div');
         recordingDiv.className = 'recording';
+        recordingDiv.setAttribute('data-recording-id', recordingId); // Assign the ID to the div
+
         recordingDiv.innerHTML = `
-        Date: ${recording.date}, Duration: ${recording.duration}ms, Notes: ${recording.notes}
-        <div class="recording-status">Status: Stopped</div>
-    `;
+         Date: ${recording.date}, Duration: ${recording.duration}ms, Notes: ${recording.notes}
+         <div class="recording-status">Status: Stopped</div>
+     `;
+
         const controlsDiv = document.createElement('div');
         controlsDiv.className = 'recording-controls';
+
         const playButton = document.createElement('button');
         playButton.innerText = 'Play';
         playButton.addEventListener('click', () => playRecording(recording, recordingDiv));
+
         const pauseButton = document.createElement('button');
         pauseButton.innerText = 'Pause';
         pauseButton.addEventListener('click', () => pauseRecording(recording, recordingDiv));
+
         const stopButton = document.createElement('button');
         stopButton.innerText = 'Stop';
         stopButton.addEventListener('click', () => stopRecordingPlay(recording, recordingDiv));
+
         const loopCheckbox = document.createElement('input');
         loopCheckbox.type = 'checkbox';
         loopCheckbox.className = 'loop-checkbox';
         const loopLabel = document.createElement('label');
         loopLabel.innerText = 'Loop';
+
+        const muteCheckbox = document.createElement('input');
+        muteCheckbox.type = 'checkbox';
+        muteCheckbox.className = 'mute-checkbox';
+        muteCheckbox.addEventListener('change', () => {
+            recording.isMuted = muteCheckbox.checked;
+        });
+        const muteLabel = document.createElement('label');
+        muteLabel.innerText = 'Mute';
+
+        const exportButton = document.createElement('button');
+        exportButton.innerText = 'Export';
+        exportButton.addEventListener('click', () => exportSequence(recording));
+
         controlsDiv.appendChild(playButton);
         controlsDiv.appendChild(pauseButton);
         controlsDiv.appendChild(stopButton);
         controlsDiv.appendChild(loopCheckbox);
         controlsDiv.appendChild(loopLabel);
+        controlsDiv.appendChild(muteCheckbox);
+        controlsDiv.appendChild(muteLabel);
+        controlsDiv.appendChild(exportButton);
+
         recordingDiv.appendChild(controlsDiv);
         recordingsDiv.appendChild(recordingDiv);
+    }
+
+    function playAllRecordings() {
+        allRecordings.forEach(recording => {
+            if (!recording.isPlaying) {
+                const recordingDiv = getRecordingDiv(recording);
+                if (recordingDiv) {
+                    playRecording(recording, recordingDiv);
+                }
+            }
+        });
+    }
+
+    function stopAllRecordings() {
+        allRecordings.forEach(recording => {
+            if (recording.isPlaying) {
+                const recordingDiv = getRecordingDiv(recording);
+                if (recordingDiv) {
+                    stopRecordingPlay(recording, recordingDiv);
+                }
+            }
+        });
+    }
+
+    function getRecordingDiv(recording) {
+        const recordingId = allRecordings.indexOf(recording); // Find the index of the recording
+        return document.querySelector(`[data-recording-id="${recordingId}"]`); // Find the div with matching ID
     }
 
     function playRecording(recording, recordingDiv) {
@@ -383,8 +473,15 @@
         recording.pauseTime = 0;
         recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
         recording.replayTimeouts = [];
+
+        // Explicitly stop all active voices tied to the recording
+        Object.keys(activeVoices).forEach(noteId => {
+            releaseNote(noteId); // Ensure all active notes are released
+        });
+
         recordingDiv.querySelector('.recording-status').innerText = 'Status: Stopped';
     }
+
 
     function replayRecordingActions(recording, recordingDiv, startTime) {
         const actions = recording.actions;
@@ -577,8 +674,73 @@
     });
 
     document.getElementById('toggleMetronome').addEventListener('click', toggleMetronome);
-    </script>
 
+    document.getElementById('playAll').addEventListener('click', playAllRecordings);
+    document.getElementById('stopAllRecordings').addEventListener('click', stopAllRecordings);
+
+
+    function exportSequence(recording) {
+        const jsonData = JSON.stringify(recording);
+        const blob = new Blob([jsonData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `recording-${recording.date.replace(/[\s:]/g, '-')}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('exportSequence').addEventListener('click', () => {
+        if (allRecordings.length > 0) {
+            exportSequence(allRecordings[allRecordings.length - 1]); // Export the latest recording
+        } else {
+            alert('No recordings available to export.');
+        }
+    });
+
+    document.getElementById('uploadSequence').addEventListener('change', handleUpload);
+
+    document.getElementById('uploadSequenceButton').addEventListener('click', () => {
+        document.getElementById('uploadSequence').click();
+    });
+
+    function handleUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const jsonData = JSON.parse(e.target.result);
+                recreateTrackFromJSON(jsonData);
+            } catch (error) {
+                alert('Invalid JSON file.');
+            }
+            // Reset the input value to ensure change event triggers next time
+            event.target.value = '';
+        };
+        reader.readAsText(file);
+    }
+
+
+    function recreateTrackFromJSON(jsonData) {
+        const recording = {
+            ...jsonData,
+            date: new Date().toLocaleString(), // Assign a new date to make it a fresh session
+            isPlaying: false,
+            currentIndex: 0,
+            pauseTime: 0,
+            replayTimeouts: [],
+            isMuted: false // Ensure mute status is also managed
+        };
+        allRecordings.push(recording);
+        addRecordingToList(recording);
+        //alert('Recording imported successfully!');
+    }
+    
+    </script>
 </body>
 
 </html>
