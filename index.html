@@ -3,7 +3,9 @@
 
 <head>
     <title>Harmonic Synth with Dynamic Keyboard</title>
+
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    
     <style>
         body {
         font-family: Arial, sans-serif;
@@ -75,7 +77,18 @@
 
 <body>
     <h1>Harmonic Synth</h1>
-    <div id="keyboard"></div>
+
+
+
+    <div id="keyboard"></div>ń
+    
+    <button id="exportSongButton">Export Song</button>
+
+    <input type="file" id="uploadSong" accept=".json" style="display: none;">
+    <button id="uploadSongButton">Upload Song</button>
+
+
+
     <div id="controls">
         <button id="record">Record</button>
         <button id="stopAll">Stop All</button>
@@ -85,6 +98,14 @@
         <input type="file" id="uploadSequence" accept=".json" style="display: none;">
         <button id="uploadSequenceButton">Upload Sequence</button>
     </div>
+
+<hr>
+
+<button id="playAllArpeggiators">Play All Arpeggiators</button>
+<button id="stopAllArpeggiators">Stop All Arpeggiators</button>
+
+
+
     <input type="number" id="tempoInput" value="120" min="40" max="240" step="1">
     <label for="tempoInput">BPM</label>
     <button id="toggleMetronome">Start/Stop Metronome</button>
@@ -261,42 +282,42 @@
         }
     });
 
-function createVoice(frequency) {
-    if (!audioStarted) return;
+    function createVoice(frequency) {
+        if (!audioStarted) return;
 
-    let osc = audioContext.createOscillator();
-    let gain = audioContext.createGain();
+        let osc = audioContext.createOscillator();
+        let gain = audioContext.createGain();
 
-    // Stochastic selection of oscillator type based on weighted probabilities
-    const oscillatorType = getStochasticOscillatorType();
-    osc.type = oscillatorType;
+        // Stochastic selection of oscillator type based on weighted probabilities
+        const oscillatorType = getStochasticOscillatorType();
+        osc.type = oscillatorType;
 
-    osc.frequency.value = frequency;
-    gain.gain.setValueAtTime(0, audioContext.currentTime);
+        osc.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, audioContext.currentTime);
 
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.start();
-    return { osc, gain };
-}
-
-function getStochasticOscillatorType() {
-    // Define probabilities for each oscillator type
-    const types = ['sine', 'square', 'sawtooth', 'triangle'];
-    const weights = [0.2, 0.3, 0.3, 0.2]; // Adjust these weights as needed
-
-    // Generate a random number and select an oscillator type based on weighted probabilities
-    const randomValue = Math.random();
-    let cumulativeWeight = 0;
-
-    for (let i = 0; i < types.length; i++) {
-        cumulativeWeight += weights[i];
-        if (randomValue < cumulativeWeight) {
-            return types[i];
-        }
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start();
+        return { osc, gain };
     }
-    return 'sine'; // Default to 'sine' if something goes wrong
-}
+
+    function getStochasticOscillatorType() {
+        // Define probabilities for each oscillator type
+        const types = ['sine', 'square', 'sawtooth', 'triangle'];
+        const weights = [0.2, 0.3, 0.3, 0.2]; // Adjust these weights as needed
+
+        // Generate a random number and select an oscillator type based on weighted probabilities
+        const randomValue = Math.random();
+        let cumulativeWeight = 0;
+
+        for (let i = 0; i < types.length; i++) {
+            cumulativeWeight += weights[i];
+            if (randomValue < cumulativeWeight) {
+                return types[i];
+            }
+        }
+        return 'sine'; // Default to 'sine' if something goes wrong
+    }
 
 
     function playNote(frequency, id, recording = null) {
@@ -547,24 +568,25 @@ function getStochasticOscillatorType() {
         }
     }
 
-    function handleMIDIKeyDown(note, velocity) {
-        const frequency = midiNoteToFreq[note];
-        if (frequency && !keyToNoteMap[note]) { // Ensure note isn't already playing
-            noteId += 1;
-            playNote(frequency, noteId);
-            recordAction('play', frequency, noteId);
-            keyToNoteMap[note] = noteId; // Track noteId for the pressed MIDI key
-        }
+function handleMIDIKeyDown(note, velocity) {
+    const frequency = midiNoteToFreq[note];
+    if (frequency && !keyToNoteMap[note]) { // Ensure note isn't already playing
+        noteId += 1;
+        playNote(frequency, noteId); // Play note
+        recordAction('play', frequency, noteId); // Record the play action
+        keyToNoteMap[note] = noteId; // Track noteId for the pressed MIDI key
     }
+}
 
-    function handleMIDIKeyUp(note) {
-        const currentNoteId = keyToNoteMap[note];
-        if (currentNoteId) {
-            recordAction('release', null, currentNoteId);
-            releaseNote(currentNoteId);
-            delete keyToNoteMap[note]; // Remove from the map when the key is released
-        }
+function handleMIDIKeyUp(note) {
+    const currentNoteId = keyToNoteMap[note];
+    if (currentNoteId) {
+        recordAction('release', null, currentNoteId); // Record the release action
+        releaseNote(currentNoteId); // Release the note
+        delete keyToNoteMap[note]; // Remove from map when key is released
     }
+}
+
 
     function bindKeyboard(frequencies) {
         keyBindings = {}; // Clear previous bindings
@@ -591,23 +613,318 @@ function getStochasticOscillatorType() {
         }
     });
 
+
+
+
+
+
+let arpeggioInterval;
+let arpeggioPlaying = false;
+let arpeggioInverted = false;
+let arpeggioSequences = [];
+const arpeggioDiv = document.createElement('div');
+document.body.appendChild(arpeggioDiv);
+arpeggioDiv.innerHTML = '<h3>Arpeggiator Sequences:</h3>';
+arpeggioDiv.id = 'arpeggioSequences';
+
+function playArpeggiator(frequencies) {
+    if (!Array.isArray(frequencies) || frequencies.length === 0) return;
+    if (arpeggioPlaying) return;
+
+    const sequence = {
+        date: new Date().toLocaleString(),
+        duration: 0,
+        notes: [],
+        isPlaying: true,
+        currentIndex: 0,
+        pauseTime: 0,
+        replayTimeouts: [],
+        isMuted: false
+    };
+
+    arpeggioSequences.push(sequence);
+    addArpeggioToList(sequence);
+
+    arpeggioPlaying = true;
+    let currentIndex = 0;
+    const arpeggioOrder = arpeggioInverted ? [...frequencies].reverse() : [...frequencies];
+    const startTime = Date.now();
+
+    function playNextNote() {
+        if (currentIndex >= arpeggioOrder.length) currentIndex = 0;
+
+        const frequency = arpeggioOrder[currentIndex];
+        noteId += 1;
+        playNote(frequency, noteId, sequence);
+        const currentNoteId = noteId; // Store the current noteId for releasing
+        sequence.notes.push({ frequency, id: currentNoteId, time: Date.now() - startTime });
+
+        // Release the note after half the interval duration
+        setTimeout(() => releaseNote(currentNoteId), (60 / tempo) * 1000 / 2);
+
+        currentIndex++;
+        sequence.duration = Date.now() - startTime;
+    }
+
+
+    const interval = (60 / tempo) * 1000; // Use current tempo
+    arpeggioInterval = setInterval(playNextNote, interval);
+}
+
+function releaseAllVoices() {
+    Object.keys(activeVoices).forEach(noteId => releaseNote(noteId));
+}
+
+function stopArpeggiator() {
+    if (arpeggioInterval) {
+        clearInterval(arpeggioInterval);
+        releaseAllVoices(); // Release all notes when stopping the arpeggiator
+        arpeggioPlaying = false;
+    }
+}
+
+
+function stopRecordingPlay(recording, recordingDiv) {
+    recording.isPlaying = false;
+    recording.pauseTime = 0;
+    recording.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+    recording.replayTimeouts = [];
+    
+    // Release all voices related to this recording
+    releaseAllVoices(); // Explicitly release all active voices tied to the recording
+    
+    recordingDiv.querySelector('.recording-status').innerText = 'Status: Stopped';
+}
+
+
+function stopAllRecordings() {
+    allRecordings.forEach(recording => {
+        if (recording.isPlaying) {
+            const recordingDiv = getRecordingDiv(recording);
+            if (recordingDiv) {
+                stopRecordingPlay(recording, recordingDiv);
+            }
+        }
+    });
+    // Ensure all active sounds from any arpeggio are stopped
+    releaseAllVoices();
+}
+
+// Example usage in other parts of the code, like when switching arpeggios
+function handleSpecialArpeggiatorKey(frequencies) {
+    if (arpeggioPlaying) {
+        stopArpeggiator();
+    } else {
+        arpeggioInverted = Math.random() < 0.5; // Randomly invert order
+        playArpeggiator(frequencies); // Pass the frequencies to play
+    }
+}
+
+// When replaying actions, make sure to release notes after they're played
+function replayArpeggioActions(sequence, arpeggioDiv, startTime) {
+    sequence.startTime = startTime;
+    sequence.notes.forEach((action, index) => {
+        const delay = action.time - (sequence.pauseTime || 0);
+        if (delay < 0) return; // Skip past actions during resumed playback
+
+        const timeout = setTimeout(() => {
+            if (!sequence.isPlaying) return; // If sequence stopped, skip the rest
+            if (!sequence.isMuted) {
+                playNote(action.frequency, action.id); // Play the note
+                setTimeout(() => releaseNote(action.id), (60 / tempo) * 1000 / 2); // Ensure note release based on tempo
+            }
+            if (index === sequence.notes.length - 1 && arpeggioDiv.querySelector('.loop-checkbox').checked) {
+                playArpeggioSequence(sequence, arpeggioDiv); // Loop if checked
+            }
+        }, delay);
+
+        sequence.replayTimeouts.push(timeout);
+    });
+}
+
+
+function addArpeggioToList(sequence) {
+    const arpeggioId = arpeggioSequences.length - 1;
+    const arpeggioDiv = document.createElement('div');
+    arpeggioDiv.className = 'recording';
+    arpeggioDiv.setAttribute('data-arpeggio-id', arpeggioId);
+    arpeggioDiv.innerHTML = `
+        Date: ${sequence.date}, Duration: ${sequence.duration}ms, Notes: ${sequence.notes.length}
+        <div class="arpeggio-status">Status: Playing</div>
+    `;
+
+    const controlsDiv = document.createElement('div');
+    controlsDiv.className = 'recording-controls';
+
+    const playButton = document.createElement('button');
+    playButton.innerText = 'Play';
+    playButton.addEventListener('click', () => playArpeggioSequence(sequence, arpeggioDiv));
+
+    const pauseButton = document.createElement('button');
+    pauseButton.innerText = 'Pause';
+    pauseButton.addEventListener('click', () => pauseArpeggioSequence(sequence, arpeggioDiv));
+
+    const stopButton = document.createElement('button');
+    stopButton.innerText = 'Stop';
+    stopButton.addEventListener('click', () => stopArpeggioPlay(sequence, arpeggioDiv));
+
+    const loopCheckbox = document.createElement('input');
+    loopCheckbox.type = 'checkbox';
+    loopCheckbox.className = 'loop-checkbox';
+    const loopLabel = document.createElement('label');
+    loopLabel.innerText = 'Loop';
+
+    const muteCheckbox = document.createElement('input');
+    muteCheckbox.type = 'checkbox';
+    muteCheckbox.className = 'mute-checkbox';
+    muteCheckbox.addEventListener('change', () => {
+        sequence.isMuted = muteCheckbox.checked;
+    });
+    const muteLabel = document.createElement('label');
+    muteLabel.innerText = 'Mute';
+
+    controlsDiv.appendChild(playButton);
+    controlsDiv.appendChild(pauseButton);
+    controlsDiv.appendChild(stopButton);
+    controlsDiv.appendChild(loopCheckbox);
+    controlsDiv.appendChild(loopLabel);
+    controlsDiv.appendChild(muteCheckbox);
+    controlsDiv.appendChild(muteLabel);
+
+    arpeggioDiv.appendChild(controlsDiv);
+    document.getElementById('arpeggioSequences').appendChild(arpeggioDiv);
+}
+
+function playArpeggioSequence(sequence, arpeggioDiv) {
+    stopArpeggioPlay(sequence, arpeggioDiv); // Stop any ongoing playback before starting
+    sequence.isPlaying = true;
+    arpeggioDiv.querySelector('.arpeggio-status').innerText = 'Status: Playing';
+    const startTime = sequence.pauseTime ? Date.now() - sequence.pauseTime : Date.now();
+    replayArpeggioActions(sequence, arpeggioDiv, startTime); // Replay actions based on sequence
+}
+
+function stopArpeggioPlay(sequence, arpeggioDiv) {
+    sequence.isPlaying = false;
+    sequence.pauseTime = 0;
+    sequence.replayTimeouts.forEach(timeout => clearTimeout(timeout)); // Clear timeouts
+    sequence.replayTimeouts = [];
+    releaseAllVoices(); // Release all active notes immediately
+    arpeggioDiv.querySelector('.arpeggio-status').innerText = 'Status: Stopped';
+}
+
+function replayArpeggioActions(sequence, arpeggioDiv, startTime) {
+    sequence.startTime = startTime;
+    sequence.notes.forEach((action, index) => {
+        const delay = action.time - (sequence.pauseTime || 0);
+        if (delay < 0) return; // Skip past actions during resumed playback
+
+        const timeout = setTimeout(() => {
+            if (!sequence.isPlaying) return; // If sequence stopped, skip the rest
+            if (!sequence.isMuted) {
+                playNote(action.frequency, action.id); // Play the note
+                setTimeout(() => releaseNote(action.id), (60 / tempo) * 1000 / 2); // Ensure note release
+            }
+            if (index === sequence.notes.length - 1 && arpeggioDiv.querySelector('.loop-checkbox').checked) {
+                playArpeggioSequence(sequence, arpeggioDiv); // Loop if checked
+            }
+        }, delay);
+
+        sequence.replayTimeouts.push(timeout);
+    });
+}
+
+function playAllArpeggiators() {
+    arpeggioSequences.forEach(sequence => {
+        if (!sequence.isPlaying) {
+            const arpeggioDiv = getArpeggioDiv(sequence);
+            if (arpeggioDiv) {
+                playArpeggioSequence(sequence, arpeggioDiv);
+            }
+        }
+    });
+}
+
+function stopAllArpeggiators() {
+    arpeggioSequences.forEach(sequence => {
+        if (sequence.isPlaying) {
+            const arpeggioDiv = getArpeggioDiv(sequence);
+            if (arpeggioDiv) {
+                stopArpeggioPlay(sequence, arpeggioDiv);
+            }
+        }
+    });
+}
+
+
+
+function pauseArpeggioSequence(sequence, arpeggioDiv) {
+    sequence.isPlaying = false;
+    sequence.pauseTime = Date.now() - sequence.startTime;
+    sequence.replayTimeouts.forEach(timeout => clearTimeout(timeout));
+    arpeggioDiv.querySelector('.arpeggio-status').innerText = 'Status: Paused';
+}
+
+
+function getArpeggioDiv(sequence) {
+    const arpeggioId = arpeggioSequences.indexOf(sequence);
+    return document.querySelector(`[data-arpeggio-id="${arpeggioId}"]`);
+}
+
+
+
+
+
+// Now, when you trigger the arpeggiator, it will create a sequence that you can control.
+
+
+
+
+
+// Add the first special key with arpeggiator function
+function handleSpecialArpeggiatorKey(frequencies) {
+    if (arpeggioPlaying) {
+        stopArpeggiator();
+    } else {
+        arpeggioInverted = Math.random() < 0.5; // Randomly invert order
+        playArpeggiator(frequencies); // Pass the frequencies to play
+    }
+}
+
+
+
+
+    // Update the makeKeyboard function to handle the first key as the arpeggiator key
     function makeKeyboard(preset) {
         const frequencies = presets[preset];
         if (!frequencies) return;
         keyboardDiv.innerHTML = ''; // Clear existing keys
         bindKeyboard(frequencies); // Bind frequencies to desktop keyboard keys
-        frequencies.forEach(freq => {
+
+        // First key for arpeggiator (special key)
+        const arpeggiatorKey = document.createElement('div');
+        arpeggiatorKey.className = 'key';
+        arpeggiatorKey.innerHTML = `<span> Play </span>`;
+        arpeggiatorKey.addEventListener('mousedown', () => handleSpecialArpeggiatorKey(frequencies));
+        keyboardDiv.appendChild(arpeggiatorKey);
+
+        // Remaining keys for sound-producing notes
+        frequencies.forEach((freq, index) => {
             const key = document.createElement('div');
             key.className = 'key';
             key.setAttribute('data-note', freq);
             key.innerHTML = `<span>${freq.toFixed(2)}</span>`;
+
+            // Regular sound-producing keys
             key.addEventListener('mousedown', (e) => handleNoteStart(e, key));
             key.addEventListener('mouseup', (e) => handleNoteEnd(e, key));
             key.addEventListener('touchstart', (e) => handleNoteStart(e, key));
             key.addEventListener('touchend', (e) => handleNoteEnd(e, key));
+
             keyboardDiv.appendChild(key);
         });
     }
+
+
     const presetSelector = document.createElement('select');
     Object.keys(presets).forEach(preset => {
         const option = document.createElement('option');
@@ -665,13 +982,23 @@ function getStochasticOscillatorType() {
         metronomeSound.start();
         metronomeSound.stop(audioContext.currentTime + 0.05); // Stop after a very short duration for a click-like sound
     }
+
+    // Metronome tempo input change event
     document.getElementById('tempoInput').addEventListener('input', (e) => {
         tempo = parseInt(e.target.value);
+
+        // Restart arpeggiator with updated tempo
+        if (arpeggioPlaying) {
+            const frequencies = presets[presetSelector.value];
+            restartArpeggiator(frequencies);
+        }
+
         if (metronomeRunning) {
             stopMetronome();
             startMetronome();
         }
     });
+
 
     document.getElementById('toggleMetronome').addEventListener('click', toggleMetronome);
 
@@ -739,8 +1066,88 @@ function getStochasticOscillatorType() {
         addRecordingToList(recording);
         //alert('Recording imported successfully!');
     }
-    
+
+
+document.getElementById('playAllArpeggiators').addEventListener('click', playAllArpeggiators);
+document.getElementById('stopAllArpeggiators').addEventListener('click', stopAllArpeggiators);
+
+
+
+function exportSong() {
+    const songData = {
+        recordings: allRecordings,
+        arpeggiators: arpeggioSequences,
+        tempo: tempo // Include the current tempo
+    };
+
+    const jsonData = JSON.stringify(songData);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `song-${new Date().toLocaleString().replace(/[\s:]/g, '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportSongButton').addEventListener('click', exportSong);
+
+
+
+function handleSongUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const songData = JSON.parse(e.target.result);
+            allRecordings = songData.recordings || [];
+            arpeggioSequences = (songData.arpeggiators || []).map(seq => ({
+                ...seq,
+                isPlaying: false,  // Ensure the sequence is reset to not playing
+                replayTimeouts: [],  // Clear any previous timeouts
+                pauseTime: 0  // Reset pause time
+            }));
+            tempo = songData.tempo || 120; // Set tempo from songData or default to 120
+
+            updateRecordingsUI();
+            updateArpeggiatorsUI();
+            alert('Song imported successfully!');
+        } catch (error) {
+            alert('Invalid JSON file.');
+        }
+    };
+    reader.readAsText(file);
+}
+
+
+function updateRecordingsUI() {
+    recordingsDiv.innerHTML = ''; // Clear the previous recordings from the UI
+    allRecordings.forEach(addRecordingToList);
+}
+
+function updateArpeggiatorsUI() {
+    const arpeggioSequencesDiv = document.getElementById('arpeggioSequences');
+    arpeggioSequencesDiv.innerHTML = ''; // Clear previous arpeggiators from the UI
+    arpeggioSequences.forEach(addArpeggioToList); // Add each sequence back to the UI
+}
+
+
+document.getElementById('uploadSong').addEventListener('change', handleSongUpload);
+document.getElementById('uploadSongButton').addEventListener('click', () => {
+    document.getElementById('uploadSong').click();
+});
+
+
+
+
     </script>
+
+
+
 </body>
 
 </html>
